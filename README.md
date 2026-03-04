@@ -4,7 +4,7 @@ A CLI-first, SDK-hybrid firewall policy engine that reconciles external IP intel
 
 ## Features
 
-- **4 IP source types** — X4BNet VPN lists, ASN prefixes (bgpq4), GeoLite2 country extraction, Cloudflare IP ranges
+- **5 IP source types** — X4BNet VPN lists, ASN prefixes (bgpq4), GeoLite2 country extraction, Cloudflare aggregated IPs, Cloudflare per-PoP local ranges (with country/city filtering)
 - **9 traffic scopes** — `inbound_tcp`, `inbound_udp`, `inbound_tcp_udp`, `inbound_all`, `outbound_*`, `bidirectional_tcp_udp`
 - **Bounded summarization** — Hierarchical supernet merging with configurable guardrails (`max_expansion_ratio`, `max_supernet_width`, `max_prefix_loss_risk`)
 - **Multi-policy firewall merging** — Multiple policies can target the same firewall label; rules are merged into a single payload
