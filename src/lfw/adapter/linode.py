@@ -106,7 +106,7 @@ class LinodeAdapter:
             devices.append({
                 "id": device.id,
                 "type": getattr(device, "type", "linode"),
-                "entity_id": getattr(device, "entity", {}).get("id"),
+                "entity_id": getattr(getattr(device, "entity", None), "id", None),
             })
         return devices
 
