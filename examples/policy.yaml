@@ -1,0 +1,97 @@
+version: 1
+
+linode:
+  base_url: "https://api.linode.com/v4"
+  page_size: 100
+  retry: 3
+  beta_enabled: false
+
+sources:
+  - id: x4b-vpn
+    type: x4b_list
+    list_paths:
+      - "output/vpn/ipv4.txt"
+    base_url: "https://raw.githubusercontent.com/X4BNet/lists_vpn/main"
+
+  - id: as3462
+    type: asn_bgpq4
+    asn: "AS3462"
+
+  - id: cloudflare
+    type: cloudflare_ips
+    urls:
+      - "https://www.cloudflare.com/ips-v4/"
+      - "https://www.cloudflare.com/ips-v6/"
+
+  # Cloudflare per-PoP IPs filtered by country/city
+  # - id: cloudflare-tw
+  #   type: cloudflare_local
+  #   countries: ["TW", "HK"]           # ISO country codes
+  #   cities: []                         # empty = all cities in those countries
+  #
+  # - id: cloudflare-tokyo
+  #   type: cloudflare_local
+  #   countries: []                      # empty = any country
+  #   cities: ["tokyo", "osaka"]         # case-insensitive city names
+
+  # - id: taiwan-geo
+  #   type: country_geolite
+  #   mmdb_path: "./GeoLite2-Country.mmdb"
+  #   countries: ["TW"]
+
+policies:
+  # Scenario 1: Block VPN providers (all ports)
+  - name: block-vpn
+    firewall_label: lfw-block-vpn
+    mode: deny
+    source_ids: [x4b-vpn]
+    ip_families: [ipv4]
+    traffic_scope: inbound_tcp_udp
+    ports: "1-65535"
+    summarization:
+      enabled: true
+      max_expansion_ratio: 8.0
+      max_supernet_width: 16
+    tags: [lfw-managed, vpn-block]
+
+  # Scenario 2: Allow AS3462 (HiNet / Taiwan ISP) on web + SSH ports
+  - name: allow-hinet
+    firewall_label: lfw-allow-hinet
+    mode: allow
+    source_ids: [as3462]
+    ip_families: [ipv4, ipv6]
+    traffic_scope: inbound_tcp_udp
+    ports: "22, 80, 443, 8080-8443"
+    summarization:
+      enabled: true
+    tags: [lfw-managed, hinet-allow]
+
+  # Scenario 3: Allow Cloudflare IPs (for reverse proxy trust)
+  - name: allow-cloudflare
+    firewall_label: lfw-allow-cf
+    mode: allow
+    source_ids: [cloudflare]
+    ip_families: [ipv4, ipv6]
+    traffic_scope: inbound_tcp
+    ports: "80, 443"
+    summarization:
+      enabled: true
+    tags: [lfw-managed, cloudflare-allow]
+
+  # Scenario 4: Allow Taiwan (uncomment sources.taiwan-geo above)
+  # - name: allow-taiwan
+  #   firewall_label: lfw-allow-tw
+  #   mode: allow
+  #   source_ids: [taiwan-geo]
+  #   ip_families: [ipv4, ipv6]
+  #   traffic_scope: inbound_tcp_udp
+  #   summarization:
+  #     enabled: true
+  #     max_expansion_ratio: 2.0
+  #     max_supernet_width: 10
+  #   tags: [lfw-managed, tw-allow]
+
+execution:
+  dry_run: true
+  parallelism: 1
+  fail_on_warnings: false

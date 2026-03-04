@@ -1,0 +1,51 @@
+version: 1
+
+linode:
+  base_url: "https://api.linode.com/v4"
+  page_size: 100
+  retry: 3
+  beta_enabled: false
+
+sources:
+  - id: cloudflare
+    type: cloudflare_ips
+    urls:
+      - "https://www.cloudflare.com/ips-v4/"
+      - "https://www.cloudflare.com/ips-v6/"
+
+  - id: hk-tw-mo-geo
+    type: country_geolite
+    mmdb_path: "./GeoLite2-Country.mmdb"
+    countries: ["HK", "TW", "MO"]
+
+policies:
+  # Rule group 1: Allow SSH (TCP 22) from Cloudflare only
+  - name: ssh-cloudflare
+    firewall_label: my-server-fw
+    mode: allow
+    source_ids: [cloudflare]
+    ip_families: [ipv4, ipv6]
+    traffic_scope: inbound_tcp
+    ports: "22"
+    summarization:
+      enabled: true
+    tags: [lfw-managed]
+
+  # Rule group 2: Allow Minecraft Bedrock (UDP 19132) from HK/TW/MO
+  - name: mc-bedrock-regional
+    firewall_label: my-server-fw
+    mode: allow
+    source_ids: [hk-tw-mo-geo]
+    ip_families: [ipv4]
+    traffic_scope: inbound_udp
+    ports: "19132"
+    summarization:
+      enabled: true
+      max_expansion_ratio: 8.0
+      max_supernet_width: 16
+    tags: [lfw-managed]
+
+execution:
+  dry_run: true
+  parallelism: 1
+  fail_on_warnings: false
