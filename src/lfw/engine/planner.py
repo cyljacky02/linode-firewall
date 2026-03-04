@@ -79,12 +79,13 @@ def plan_policy(
     # Step 1: resolve sources
     records, snapshot_refs = resolve_sources(spec, policy)
 
-    # Step 2: normalize
+    # Step 2: normalize (with optional prefix uplift)
     prefix_set = build_resolved_set(
         policy_name=policy.name,
         records=records,
         ip_families=families,
         snapshot_refs=snapshot_refs,
+        prefix_uplift=policy.prefix_uplift,
     )
 
     # Step 3: derive protocol-aware rule budget
@@ -196,6 +197,7 @@ def _build_policy_rule_packs(
         records=records,
         ip_families=families,
         snapshot_refs=snapshot_refs,
+        prefix_uplift=policy.prefix_uplift,
     )
 
     proto_count = scope_protocol_count(scope, is_nodebalancer=is_nb)

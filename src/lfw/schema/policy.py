@@ -184,6 +184,17 @@ class PolicyConfig(BaseModel):
     )
     targets: list[TargetConfig] = Field(default_factory=list)
     summarization: SummarizationConfig = Field(default_factory=SummarizationConfig)
+    prefix_uplift: int | None = Field(
+        default=None,
+        ge=1,
+        le=128,
+        description=(
+            "Uplift narrow CIDRs to a wider boundary then deduplicate. "
+            "E.g. 24 converts all /25-/32 to their parent /24 subnet. "
+            "Applied after source fetch + normalization, before summarization. "
+            "None = no uplift."
+        ),
+    )
     tags: list[str] = Field(default_factory=lambda: ["lfw-managed"])
 
     @field_validator("ports")

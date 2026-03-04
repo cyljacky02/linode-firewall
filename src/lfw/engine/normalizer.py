@@ -88,16 +88,55 @@ def collapse_exact(records: list[PrefixRecord]) -> list[PrefixRecord]:
     return result
 
 
+def uplift_prefixes(
+    records: list[PrefixRecord],
+    max_prefix: int,
+) -> list[PrefixRecord]:
+    """Widen CIDRs narrower than ``max_prefix`` to that boundary, then dedup.
+
+    E.g. with ``max_prefix=24``, a /32 like ``1.2.3.4/32`` becomes
+    ``1.2.3.0/24``.  Duplicates from overlapping uplifts are removed.
+    """
+    seen: set[str] = set()
+    result: list[PrefixRecord] = []
+    for rec in records:
+        net = ipaddress.ip_network(rec.cidr, strict=False)
+        if net.prefixlen > max_prefix:
+            net = ipaddress.ip_network(
+                f"{net.network_address}/{max_prefix}", strict=False
+            )
+        cidr = str(net)
+        if cidr not in seen:
+            seen.add(cidr)
+            result.append(PrefixRecord(
+                cidr=cidr,
+                family=rec.family,
+                source_id=rec.source_id,
+                provenance=rec.provenance,
+            ))
+    return result
+
+
 def build_resolved_set(
     policy_name: str,
     records: list[PrefixRecord],
     ip_families: list[IpFamily],
     snapshot_refs: list[str],
+    prefix_uplift: int | None = None,
 ) -> ResolvedPrefixSet:
-    """Full normalization pipeline: normalize → dedup → collapse → set."""
+    """Full normalization pipeline: normalize → dedup → [uplift] → collapse → set."""
     raw_count = len(records)
 
     normalized = normalize_and_dedup(records, ip_families)
+
+    if prefix_uplift is not None:
+        pre = len(normalized)
+        normalized = uplift_prefixes(normalized, prefix_uplift)
+        logger.info(
+            "Policy '%s': prefix uplift /%d: %d → %d CIDRs",
+            policy_name, prefix_uplift, pre, len(normalized),
+        )
+
     collapsed = collapse_exact(normalized)
 
     result = ResolvedPrefixSet(
