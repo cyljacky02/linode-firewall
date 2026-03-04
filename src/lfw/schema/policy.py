@@ -97,6 +97,27 @@ class CloudflareLocalSource(BaseModel):
         default_factory=list,
         description="City names to include (case-insensitive). Empty = all.",
     )
+    max_prefix_length: int | None = Field(
+        default=None,
+        ge=1,
+        le=128,
+        description=(
+            "Drop CIDRs with prefix length longer than this value. "
+            "E.g. 24 keeps /24, /23, /22... but drops /25-/32 single IPs. "
+            "None = no filter (keep all)."
+        ),
+    )
+    prefix_uplift: int | None = Field(
+        default=None,
+        ge=1,
+        le=128,
+        description=(
+            "Uplift narrow CIDRs to a wider boundary then deduplicate. "
+            "E.g. 24 converts all /25-/32 to their parent /24 subnet. "
+            "Greatly reduces CIDR count while preserving coverage. "
+            "None = no uplift."
+        ),
+    )
 
     @field_validator("countries")
     @classmethod

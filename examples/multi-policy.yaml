@@ -10,6 +10,7 @@ sources:
   - id: cloudflare-tw
     type: cloudflare_local
     countries: ["TW"]
+    prefix_uplift: 24
 
   - id: hk-tw-mo-geo
     type: country_geolite

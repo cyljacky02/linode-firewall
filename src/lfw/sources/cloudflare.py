@@ -100,6 +100,8 @@ class CloudflareLocalProvider(SourceProvider):
         self._config = config
         self._country_filter = set(config.countries)  # already uppercased
         self._city_filter = set(config.cities)         # already lowercased
+        self._max_prefix = config.max_prefix_length
+        self._prefix_uplift = config.prefix_uplift
 
     def fetch(self) -> tuple[SourceSnapshot, list[PrefixRecord]]:
         lines, raw = _fetch_lines(self._config.url)
@@ -127,6 +129,8 @@ class CloudflareLocalProvider(SourceProvider):
 
             try:
                 net = ipaddress.ip_network(cidr_raw, strict=False)
+                if self._max_prefix is not None and net.prefixlen > self._max_prefix:
+                    continue
                 cidr = str(net)
                 provenance = f"cloudflare/{row_country or 'local'}"
                 if row_city:
@@ -139,6 +143,32 @@ class CloudflareLocalProvider(SourceProvider):
                 ))
             except ValueError:
                 continue
+
+        # Apply prefix uplift: widen narrow CIDRs to boundary then dedup
+        if self._prefix_uplift is not None:
+            pre_uplift = len(records)
+            seen: set[str] = set()
+            uplifted: list[PrefixRecord] = []
+            for rec in records:
+                net = ipaddress.ip_network(rec.cidr, strict=False)
+                if net.prefixlen > self._prefix_uplift:
+                    net = ipaddress.ip_network(
+                        f"{net.network_address}/{self._prefix_uplift}", strict=False
+                    )
+                cidr = str(net)
+                if cidr not in seen:
+                    seen.add(cidr)
+                    uplifted.append(PrefixRecord(
+                        cidr=cidr,
+                        family=rec.family,
+                        source_id=rec.source_id,
+                        provenance=rec.provenance,
+                    ))
+            records = uplifted
+            logger.info(
+                "Cloudflare local '%s': prefix uplift /%d: %d → %d CIDRs",
+                self._config.id, self._prefix_uplift, pre_uplift, len(records),
+            )
 
         metadata: dict = {}
         if self._config.countries:
