@@ -177,8 +177,14 @@ def plan_policy(
 def _build_policy_rule_packs(
     spec: PolicySpec,
     policy: PolicyConfig,
+    max_rules: int | None = None,
 ) -> tuple[dict, list]:
-    """Resolve sources and build rule packs for a single policy (no diff)."""
+    """Resolve sources and build rule packs for a single policy (no diff).
+
+    When ``max_rules`` is provided (by ``plan_firewall``), it overrides the
+    default full-firewall budget so that multiple policies can share the
+    25-rule limit.
+    """
     mode = PolicyMode(policy.mode)
     families = [IpFamily(f) for f in policy.ip_families]
     scope = TrafficScope(policy.traffic_scope)
@@ -209,7 +215,10 @@ def _build_policy_rule_packs(
                 max_supernet_width=policy.summarization.max_supernet_width or 8,
                 max_prefix_loss_risk=policy.summarization.max_prefix_loss_risk or 0.05,
             )
-        effective_rules = MAX_RULES_PER_FIREWALL // max(proto_count, 1)
+        if max_rules is not None:
+            effective_rules = max_rules // max(proto_count, 1)
+        else:
+            effective_rules = MAX_RULES_PER_FIREWALL // max(proto_count, 1)
         ipv4_cidrs, ipv6_cidrs, summarization_reports = summarize_prefix_set(
             ipv4_cidrs=ipv4_cidrs,
             ipv6_cidrs=ipv6_cidrs,
@@ -231,6 +240,14 @@ def _build_policy_rule_packs(
     return rule_packs, summarization_reports
 
 
+def _count_pack_rules(packs: dict) -> int:
+    """Count total rules across all directions in a rule pack dict."""
+    total = 0
+    for pack in packs.values():
+        total += pack.rule_count if hasattr(pack, "rule_count") else len(pack)
+    return total
+
+
 def plan_firewall(
     spec: PolicySpec,
     policies: list[PolicyConfig],
@@ -239,8 +256,9 @@ def plan_firewall(
 ) -> ApplyPlan:
     """Plan a single firewall from one or more policies sharing the same label.
 
-    When multiple policies target the same firewall_label, their rule packs
-    are merged into a single combined payload.
+    Uses two-pass planning when multiple policies share a firewall:
+    - Pass 1: build each policy unconstrained to learn rule counts
+    - Pass 2: if total > 25, re-plan with proportionally allocated budgets
     """
     if not policies:
         raise ValueError("No policies provided for firewall planning")
@@ -248,18 +266,59 @@ def plan_firewall(
     firewall_label = policies[0].firewall_label
     policy_names = [p.name for p in policies]
 
-    all_rule_packs = []
-    all_reports = []
     all_attachments: list[TargetRef] = []
-
     for policy in policies:
-        packs, reports = _build_policy_rule_packs(spec, policy)
-        all_rule_packs.append(packs)
-        all_reports.extend(reports)
         all_attachments.extend(
             TargetRef(device_type=DeviceType(t.type), identifier=t.id)
             for t in policy.targets
         )
+
+    # Pass 1: unconstrained build
+    pass1_packs: list[dict] = []
+    pass1_reports: list = []
+    for policy in policies:
+        packs, reports = _build_policy_rule_packs(spec, policy)
+        pass1_packs.append(packs)
+        pass1_reports.extend(reports)
+
+    pass1_rule_counts = [_count_pack_rules(p) for p in pass1_packs]
+    total_pass1 = sum(pass1_rule_counts)
+
+    if total_pass1 <= MAX_RULES_PER_FIREWALL:
+        # Fits — use pass 1 results directly
+        all_rule_packs = pass1_packs
+        all_reports = pass1_reports
+    else:
+        # Pass 2: re-plan with proportional budgets
+        logger.info(
+            "Firewall '%s': pass 1 produced %d rules (limit %d), "
+            "re-planning with budget allocation.",
+            firewall_label, total_pass1, MAX_RULES_PER_FIREWALL,
+        )
+        budgets: list[int] = []
+        for count in pass1_rule_counts:
+            share = max(1, round(MAX_RULES_PER_FIREWALL * count / total_pass1))
+            budgets.append(share)
+
+        # Adjust to ensure sum == 25: trim the largest budget
+        while sum(budgets) > MAX_RULES_PER_FIREWALL:
+            largest_idx = budgets.index(max(budgets))
+            budgets[largest_idx] -= 1
+        while sum(budgets) < MAX_RULES_PER_FIREWALL:
+            smallest_idx = budgets.index(min(budgets))
+            budgets[smallest_idx] += 1
+
+        all_rule_packs = []
+        all_reports = []
+        for policy, budget in zip(policies, budgets):
+            logger.info(
+                "  Policy '%s': allocated %d rules (was %d unconstrained).",
+                policy.name, budget,
+                pass1_rule_counts[policies.index(policy)],
+            )
+            packs, reports = _build_policy_rule_packs(spec, policy, max_rules=budget)
+            all_rule_packs.append(packs)
+            all_reports.extend(reports)
 
     merged_packs = merge_rule_packs(all_rule_packs) if len(all_rule_packs) > 1 else all_rule_packs[0]
     desired_payload = rule_packs_to_api_payload(merged_packs)

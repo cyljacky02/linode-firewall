@@ -7,11 +7,9 @@ linode:
   beta_enabled: false
 
 sources:
-  - id: cloudflare
-    type: cloudflare_ips
-    urls:
-      - "https://www.cloudflare.com/ips-v4/"
-      - "https://www.cloudflare.com/ips-v6/"
+  - id: cloudflare-tw
+    type: cloudflare_local
+    countries: ["TW"]
 
   - id: hk-tw-mo-geo
     type: country_geolite
@@ -23,12 +21,14 @@ policies:
   - name: ssh-cloudflare
     firewall_label: my-server-fw
     mode: allow
-    source_ids: [cloudflare]
-    ip_families: [ipv4, ipv6]
+    source_ids: [cloudflare-tw]
+    ip_families: [ipv4]
     traffic_scope: inbound_tcp
     ports: "22"
     summarization:
       enabled: true
+      max_expansion_ratio: 4.0
+      max_supernet_width: 12
     tags: [lfw-managed]
 
   # Rule group 2: Allow Minecraft Bedrock (UDP 19132) from HK/TW/MO
